@@ -1,0 +1,17 @@
+[package]
+name = "notify_test"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "channel"
+test = false
+bench = false
+
+[[bin]]
+name = "callback"
+test = false
+bench = false
+
+[dependencies]
+notify = "5.0.0-pre.15"

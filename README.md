@@ -23,7 +23,7 @@ You likely want either [the latest 4.0 release] or [5.0.0-pre.15].
 - [API Documentation][docs]
 - [Crate page][crate]
 - [Changelog][changelog]
-- Earliest supported Rust version: **1.47.0**
+- Earliest supported Rust version: **1.56.0**
 
 As used by: [alacritty], [cargo watch], [cobalt], [docket], [mdBook], [pax],
 [rdiff], [rust-analyzer], [timetrack], [watchexec], [xi-editor], and others.
@@ -38,107 +38,63 @@ notify = "5.0.0-pre.15"
 
 ## Usage
 
-The examples below are aspirational only, to preview what the final release may
-have looked like. They may not work. Refer to [the API documentation][docs] instead.
+Notify provides a raw and a debounced mode. The the raw mode gives you all events as received by your specific OS.
+
+### Undebounced
+
+Channel-Based example:
 
 ```rust
-use notify::{RecommendedWatcher, RecursiveMode, Result, watcher};
-use std::time::Duration;
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use std::path::Path;
 
-fn main() -> Result<()> {
+fn main() {
+    let (tx, rx) = std::sync::mpsc::channel();
     // Automatically select the best implementation for your platform.
     // You can also access each implementation directly e.g. INotifyWatcher.
-    let mut watcher = watcher(Duration::from_secs(2))?;
+    let mut watcher = RecommendedWatcher::new(tx).unwrap();
 
     // Add a path to be watched. All files and directories at that path and
     // below will be monitored for changes.
-    watcher.watch("/home/test/notify", RecursiveMode::Recursive)?;
+    watcher
+        .watch(Path::new("."), RecursiveMode::Recursive)
+        .unwrap();
 
     // This is a simple loop, but you may want to use more complex logic here,
     // for example to handle I/O.
-    for event in &watcher {
-        match event {
-            Ok(event) => println!("changed: {:?}", event.path),
-            Err(err) => println!("watch error: {:?}", err),
-        };
-    }
-
-    Ok(())
-}
-```
-
-### With a channel
-
-To get a channel for advanced or flexible cases, use:
-
-```rust
-let rx = watcher.channel();
-
-loop {
-    match rx.recv() {
-        // ...
+    for e in rx {
+        match e {
+            Ok(event) => println!("{:?}", event),
+            Err(e) => println!("watch error: {:?}", e),
+        }
     }
 }
 ```
 
-To pass in a channel manually:
+You may also use a callback function instead of a channel.
 
 ```rust
-let (tx, rx) = crossbeam_channel::unbounded();
-let mut watcher: RecommendedWatcher = Watcher::with_channel(tx, Duration::from_secs(2))?;
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use std::path::Path;
 
-for event in rx.iter() {
-    // ...
+fn main() {
+    // start watcher with callback
+    let mut watcher = RecommendedWatcher::new(|e| match e {
+        Ok(event) => println!("{:?}", event),
+        Err(e) => println!("watch error: {:?}", e),
+    })
+    .unwrap();
+
+    // watch some stuff
+    watcher
+        .watch(Path::new("."), RecursiveMode::Recursive)
+        .unwrap();
+
+    loop {
+        // unblocked main thread, for this demo we need to loop or the program would exit instantly
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
 }
-```
-
-### With precise events
-
-By default, Notify issues generic events that carry little additional
-information beyond what path was affected. On some platforms, more is
-available; stay aware though that how exactly that manifests varies. To enable
-precise events, use:
-
-```rust
-use notify::Config;
-watcher.configure(Config::PreciseEvents(true));
-```
-
-### With notice events
-
-Sometimes you want to respond to some events straight away, but not give up the
-advantages of debouncing. Notice events appear once immediately when the occur
-during a debouncing period, and then a second time as usual at the end of the
-debouncing period:
-
-```rust
-use notify::Config;
-watcher.configure(Config::NoticeEvents(true));
-```
-
-### With ongoing events
-
-Sometimes frequent writes may be missed or not noticed often enough. Ongoing
-write events can be enabled to emit more events even while debouncing:
-
-```rust
-use notify::Config;
-watcher.configure(Config::OngoingEvents(Some(Duration::from_millis(500))));
-```
-
-### Without debouncing
-
-To receive events as they are emitted, without debouncing at all:
-
-```rust
-let mut watcher = immediate_watcher()?;
-```
-
-With a channel:
-
-```rust
-let (tx, rx) = unbounded();
-let mut watcher: RecommendedWatcher = Watcher::immediate_with_channel(tx)?;
 ```
 
 ### Serde
@@ -152,10 +108,12 @@ notify = { version = "5.0.0-pre.15", features = ["serde"] }
 ## Platforms
 
 - Linux / Android: inotify
-- macOS: FSEvents
+- macOS: FSEvents (default) / kqueue
 - Windows: ReadDirectoryChangesW
 - FreeBSD / NetBSD / OpenBSD / DragonflyBSD: kqueue
-- All platforms: polling
+- All platforms: polling, fallback for everything else
+
+Polling also supports a mode for watching directories that cannot be monitored by watching the last change date per file (`/sys` on linux).
 
 ### FSEvents
 
